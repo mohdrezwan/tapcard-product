@@ -23,36 +23,26 @@ const app = express();
 // Without trust proxy, express-rate-limit v7 throws a ValidationError on every request.
 app.set('trust proxy', 1);
 app.use(compression());
-const PORT = process.env.PORT || 8080;
-const ALLOWED_DOMAINS = new Set([
-  'mediaprima.com.my',
-  '8tv.com.my',
-  'bh.com.my',
-  'bharian.com.my',
-  'bigtree.com.my',
-  'hmetro.com.my',
-  'mediaprima.audio',
-  'nst.com.my',
-  'nstp.com.my',
-  'ntv7.com.my',
-  'primeworks.com.my',
-  'revmedia.my',
-  'thevocket.com',
-  'tv3.com.my',
-  'tv9.com.my',
-  'wowshop.com.my',
-]);
-const WEB_CLIENT_ID = '116309832828-fokuccsb80ejd27q83rpnpt8751mplk8.apps.googleusercontent.com';
-const CSV_PATH = path.join(__dirname, 'mpbstafflist.csv');
+const { validateEnv } = require('./validateEnv');
 
-// ─── Admin: superadmin + role-based access ───────────────────────────────────
-const SUPERADMIN_EMAIL = 'rezwan@mediaprima.com.my';
-
-const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
-if (!GOOGLE_CLIENT_SECRET) {
-  console.error('FATAL: GOOGLE_CLIENT_SECRET environment variable is not set.');
+const missing = validateEnv(process.env);
+if (missing.length > 0) {
+  console.error('FATAL: Missing required environment variables:', missing.join(', '));
   process.exit(1);
 }
+
+const ADMIN_KEY = process.env.ADMIN_KEY || '';
+const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
+const OAUTH_CLIENT_ID = process.env.OAUTH_CLIENT_ID;
+const ALLOWED_DOMAINS = new Set(process.env.ALLOWED_DOMAINS.split(',').map(function(d) { return d.trim().toLowerCase(); }));
+const SUPERADMIN_EMAIL = process.env.SUPERADMIN_EMAIL.toLowerCase().trim();
+const GCP_PROJECT_ID = process.env.GCP_PROJECT_ID;
+const PHOTO_BUCKET = process.env.PHOTO_BUCKET;
+const ALLOWED_ORIGINS = process.env.CORS_ORIGINS.split(',').map(function(o) { return o.trim(); });
+const APP_NAME = process.env.APP_NAME || 'TapCard';
+const PORT = parseInt(process.env.PORT || '8080', 10);
+const DEBUG = process.env.DEBUG === 'true';
+const CSV_PATH = path.join(__dirname, 'stafflist.csv');
 
 // ─── Staff CSV ────────────────────────────────────────────────────────────────
 let staffMap = {};
@@ -91,11 +81,9 @@ async function initStaffMap() {
 }
 
 // ─── Firestore + Storage ──────────────────────────────────────────────────────
-admin.initializeApp({ projectId: 'mp-git-rezwan' });
+admin.initializeApp({ projectId: GCP_PROJECT_ID });
 const db = admin.firestore();
-const PHOTO_BUCKET = 'mp-git-rezwan-photos';
 const bucket = admin.storage().bucket(PHOTO_BUCKET);
-const VALID_THEME_IDS = new Set(['mpb', 'omnia', 'ctn', 'nstp', 'bigtree', 'mpa', 'rev']);
 
 // Percent-encode '@' in GCS URL paths so browsers don't misparse the URL as
 // containing userinfo (the "user@host" authority form). Without this Chrome's
@@ -109,22 +97,18 @@ function normaliseGCSUrl(url) {
 }
 
 // ─── Google Auth ──────────────────────────────────────────────────────────────
-const oauthClient = new OAuth2Client(WEB_CLIENT_ID);
+const oauthClient = new OAuth2Client(OAUTH_CLIENT_ID);
 
 // M-5: Proper token verification with aud check via google-auth-library
 async function verifyGoogleToken(idToken) {
   const ticket = await oauthClient.verifyIdToken({
     idToken,
-    audience: WEB_CLIENT_ID,
+    audience: OAUTH_CLIENT_ID,
   });
   return ticket.getPayload();
 }
 
-// ─── H-2: CORS locked to Firebase Hosting origin only ────────────────────────
-const ALLOWED_ORIGINS = [
-  'https://bizcard.mediaprima.com.my',
-  'https://mp-git-rezwan.web.app',
-];
+// ─── H-2: CORS locked to configured origins only ─────────────────────────────
 app.use(cors({
   origin: ALLOWED_ORIGINS,
   methods: ['GET', 'POST'],
@@ -204,7 +188,7 @@ function requireRole(...roles) {
 }
 
 // ─── Audit log helpers ────────────────────────────────────────────────────────
-// Masks email to "re****@mediaprima.com.my" for privacy in audit entries
+// Masks email to "re****@domain.com" for privacy in audit entries
 function maskEmail(email) {
   if (!email) return '';
   const at = email.indexOf('@');
@@ -329,7 +313,7 @@ app.post('/auth/exchange', authLimiter, async (req, res) => {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
         code,
-        client_id:     WEB_CLIENT_ID,
+        client_id:     OAUTH_CLIENT_ID,
         client_secret: GOOGLE_CLIENT_SECRET,
         redirect_uri:  redirectUri,
         grant_type:    'authorization_code',
@@ -363,7 +347,7 @@ app.post('/auth/google', authLimiter, async (req, res) => {
 
     if (!ALLOWED_DOMAINS.has(email.split('@')[1])) {
       logAudit('WARN', 'AUTH_DENIED', email, 'Domain not in allowlist', req.ip);
-      return res.status(403).json({ error: 'Access denied. Please use your Media Prima email.' });
+      return res.status(403).json({ error: 'Access denied. Your email domain is not authorised.' });
     }
 
     logAudit('INFO', 'AUTH_SUCCESS', email, 'Sign in', req.ip);
@@ -421,7 +405,6 @@ app.post('/profile/:email', profileLimiter, requireAuth, async (req, res) => {
     if (!validPhoto) return res.status(400).json({ error: 'Invalid photo format.' });
     if (photo.length > 300000) return res.status(400).json({ error: 'Photo data too large.' });
   }
-  if (theme !== undefined && !VALID_THEME_IDS.has(theme)) return res.status(400).json({ error: 'Invalid theme.' });
   const profile = { name, title, dept, phone, honorific, photo, email, updatedAt: Date.now() };
   if (theme !== undefined) profile.theme = theme;
   try {
@@ -456,7 +439,7 @@ app.get('/vcard/:email', vcardLimiter, async (req, res) => {
     dept:  sanitizeVCardField(edited.dept  || staff['BusinessUnit']   || ''),
     phone: edited.phone || staff['work_phone'] || '',
     photo: normaliseGCSUrl(edited.photo || null),
-    theme: VALID_THEME_IDS.has(edited.theme) ? edited.theme : 'mpb',
+    theme: edited.theme || 'default',
   };
   res.set('Cache-Control', 'no-store');
   res.json(data);
@@ -533,7 +516,7 @@ app.post('/profile/:email/photo', profileLimiter, requireAuth, async (req, res) 
     });
     // Make the object publicly readable so the storage.googleapis.com URL works in browsers.
     // If the bucket uses Uniform Bucket-Level Access, makePublic() is a no-op (IAM controls
-    // access); run: gsutil iam ch allUsers:objectViewer gs://mp-git-rezwan-photos
+    // access); run: gsutil iam ch allUsers:objectViewer gs://<PHOTO_BUCKET>
     await file.makePublic().catch(() => {});
     // Append ?v=<timestamp> so browsers always fetch the new photo even if the path is identical
     const photoUrl = 'https://storage.googleapis.com/' + PHOTO_BUCKET + '/' + gcsPath + '?v=' + now;
@@ -558,7 +541,7 @@ app.get('/proxy-image', profileLimiter, requireAuth, async (req, res) => {
   if (parsed.protocol !== 'https:') return res.status(400).json({ error: 'HTTPS required.' });
   const isGoogleUser = parsed.hostname.endsWith('.googleusercontent.com');
   const isGCS = parsed.hostname === 'storage.googleapis.com' &&
-    parsed.pathname.startsWith('/mp-git-rezwan-photos/');
+    parsed.pathname.startsWith('/' + PHOTO_BUCKET + '/');
   if (!isGoogleUser && !isGCS) {
     return res.status(400).json({ error: 'Invalid or missing url parameter.' });
   }
@@ -705,7 +688,7 @@ app.post('/admin/admins', adminLimiter, requireAdmin, express.json(), async (req
 
   if (action === 'add') {
     if (!targetEmail || !ALLOWED_DOMAINS.has(targetEmail.split('@')[1])) {
-      return res.status(400).json({ error: 'Invalid or non-MPB email.' });
+      return res.status(400).json({ error: 'Invalid email or domain not in allowlist.' });
     }
     if (targetEmail === SUPERADMIN_EMAIL) {
       return res.status(400).json({ error: 'Cannot modify superadmin.' });
@@ -754,7 +737,7 @@ app.get('/admin', adminLimiter, (req, res) => {
   const initData = JSON.stringify({
     staffCount: Object.keys(staffMap).length,
     lastUploadTime,
-    clientId: WEB_CLIENT_ID,
+    clientId: OAUTH_CLIENT_ID,
   });
 
   res.send(`<!DOCTYPE html>
@@ -762,7 +745,7 @@ app.get('/admin', adminLimiter, (req, res) => {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>TapCard Admin — Media Prima</title>
+  <title>${APP_NAME} Admin</title>
   <style>
     *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
     body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#F2EDE6;min-height:100vh;color:#1A1A1A}
@@ -904,11 +887,10 @@ app.get('/admin', adminLimiter, (req, res) => {
 <div id="login-screen" class="login-wrap">
   <div class="login-card">
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:24px;justify-content:center">
-      <div style="background:#E8231A;border-radius:4px;padding:3px 7px;color:#fff;font-weight:800;font-size:13px">media prima</div>
-      <span style="font-weight:700;font-size:14px">TapCard Admin</span>
+      <span style="font-weight:700;font-size:14px">${APP_NAME} Admin</span>
     </div>
     <h1>Admin Access</h1>
-    <p>Sign in with your Media Prima Google account to access the dashboard.</p>
+    <p>Sign in with your Google account to access the dashboard.</p>
     <div class="login-err" id="login-err"></div>
     <button class="g-btn" id="g-signin" onclick="startGoogleLogin()">
       <svg viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 01-2.2 3.32v2.77h3.57c2.08-1.92 3.27-4.74 3.27-8.1z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
@@ -921,8 +903,7 @@ app.get('/admin', adminLimiter, (req, res) => {
 <div id="dashboard" style="display:none">
 <header class="hdr">
   <div class="hdr-left">
-    <div class="hdr-logo">media prima</div>
-    <span class="hdr-title">TapCard Admin</span>
+    <span class="hdr-title">${APP_NAME} Admin</span>
   </div>
   <div class="hdr-right">
     <span class="hdr-email" id="hdr-email"></span>
@@ -933,7 +914,7 @@ app.get('/admin', adminLimiter, (req, res) => {
 
 <div class="main">
   <div class="pg-title">Dashboard</div>
-  <div class="pg-sub">Digital Business Card &mdash; Media Prima Group</div>
+  <div class="pg-sub">Digital Business Card &mdash; ${APP_NAME}</div>
 
   <!-- Service Health (system_admin+ only) ─────────────────────────────────── -->
   <div data-min-role="system_admin">
@@ -995,7 +976,7 @@ app.get('/admin', adminLimiter, (req, res) => {
   <div id="tab-staff">
     <div class="upload-card">
       <h2>Refresh Staff List</h2>
-      <p>Upload a new <strong>mpbstafflist.csv</strong> to update the authorised staff directory. All Cloud Run instances pick up the new list immediately via Firestore.</p>
+      <p>Upload a new <strong>stafflist.csv</strong> to update the authorised staff directory. All instances pick up the new list immediately via Firestore.</p>
       <div class="status-row">
         <div class="status-block">
           <div class="sl">Records loaded</div>
@@ -1051,7 +1032,7 @@ app.get('/admin', adminLimiter, (req, res) => {
     <div class="admin-card">
       <h2>Manage Admin Users</h2>
       <div class="add-row" id="add-admin-row">
-        <input type="email" id="new-admin-email" placeholder="email@mediaprima.com.my">
+        <input type="email" id="new-admin-email" placeholder="admin@example.com">
         <select id="new-admin-role"><option value="data_admin">Data Admin</option><option value="system_admin">System Admin</option></select>
         <button onclick="addAdmin()">Add Admin</button>
       </div>
@@ -1418,22 +1399,28 @@ app.get('/admin', adminLimiter, (req, res) => {
 });
 
 // ─── Start ────────────────────────────────────────────────────────────────────
-(async () => {
-  await initStaffMap();
-  const server = app.listen(PORT, () => {
-    console.log('TapCard API running on port ' + PORT);
-  });
+// Only listen when run directly — allows require() in tests
+if (require.main === module) {
+  (function() {
+    initStaffMap().then(function() {
+      const server = app.listen(PORT, function() {
+        console.log(APP_NAME + ' API listening on port ' + PORT);
+      });
 
-  // Reset metrics hourly to prevent unbounded latencySum accumulation
-  setInterval(() => metrics.reset(), 60 * 60 * 1000).unref();
+      // Reset metrics hourly to prevent unbounded latencySum accumulation
+      setInterval(function() { metrics.reset(); }, 60 * 60 * 1000).unref();
 
-  process.on('SIGTERM', () => {
-    console.log('SIGTERM received, draining connections…');
-    server.close(() => {
-      console.log('Server closed');
-      process.exit(0);
+      process.on('SIGTERM', function() {
+        console.log('SIGTERM received, draining connections…');
+        server.close(function() {
+          console.log('Server closed');
+          process.exit(0);
+        });
+        // Force exit after 9s if keep-alive connections stall drain
+        setTimeout(function() { process.exit(1); }, 9000).unref();
+      });
     });
-    // Force exit after 9s if keep-alive connections stall drain
-    setTimeout(() => process.exit(1), 9000).unref();
-  });
-})();
+  })();
+}
+
+module.exports = app;
