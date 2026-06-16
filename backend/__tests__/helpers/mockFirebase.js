@@ -3,45 +3,50 @@
 function makeFirestoreMock(docData) {
   const docs = Object.assign({}, docData || {});
 
-  const docRef = function(path) {
+  // collectionName prefix prevents key collision between collection().doc() and db.doc()
+  const docRef = function(key) {
     return {
       get: jest.fn(function() {
         return Promise.resolve({
-          exists: path in docs,
-          data: function() { return docs[path]; },
+          exists: key in docs,
+          data: function() { return docs[key]; },
         });
       }),
       set: jest.fn(function(data) {
-        docs[path] = data;
+        docs[key] = data;
         return Promise.resolve();
       }),
       update: jest.fn(function(data) {
-        docs[path] = Object.assign({}, docs[path] || {}, data);
+        docs[key] = Object.assign({}, docs[key] || {}, data);
         return Promise.resolve();
       }),
       delete: jest.fn(function() {
-        delete docs[path];
+        delete docs[key];
         return Promise.resolve();
       }),
     };
   };
 
   return {
-    collection: jest.fn(function() {
+    collection: jest.fn(function(collName) {
       return {
-        doc: jest.fn(function(id) { return docRef(id); }),
+        doc: jest.fn(function(id) { return docRef(collName + '/' + id); }),
         add: jest.fn(function(data) {
           const id = 'auto-' + Date.now();
-          docs[id] = data;
+          docs[collName + '/' + id] = data;
           return Promise.resolve({ id: id });
         }),
         get: jest.fn(function() {
+          const prefix = collName + '/';
           return Promise.resolve({
-            docs: Object.keys(docs).map(function(id) {
-              return { id: id, data: function() { return docs[id]; }, exists: true };
-            }),
+            docs: Object.keys(docs)
+              .filter(function(k) { return k.startsWith(prefix); })
+              .map(function(k) {
+                return { id: k.slice(prefix.length), data: function() { return docs[k]; }, exists: true };
+              }),
           });
         }),
+        where: jest.fn().mockReturnThis(),
         orderBy: jest.fn().mockReturnThis(),
         limit: jest.fn().mockReturnThis(),
       };
