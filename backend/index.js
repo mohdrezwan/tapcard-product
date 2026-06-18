@@ -1070,6 +1070,7 @@ app.get('/admin', adminLimiter, (req, res) => {
     <button class="tab-btn active" id="tbtn-staff" onclick="showTab('staff')">Staff List</button>
     <button class="tab-btn" id="tbtn-audit" onclick="showTab('audit')">Audit Log</button>
     <button class="tab-btn" id="tbtn-admins" onclick="showTab('admins')" data-min-role="system_admin" style="display:none">Admin Users</button>
+    <button class="tab-btn" id="tbtn-themes" onclick="showTab('themes')" data-min-role="system_admin" style="display:none">Themes</button>
   </div>
 
   <!-- Staff List Tab ─────────────────────────────────────────────────────── -->
@@ -1142,6 +1143,40 @@ app.get('/admin', adminLimiter, (req, res) => {
           <thead><tr><th>Email</th><th>Role</th><th>Added By</th><th></th></tr></thead>
           <tbody id="admin-body"><tr><td colspan="4" class="tbl-empty">Loading&hellip;</td></tr></tbody>
         </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Themes Tab (system_admin+ only) ─────────────────────────────────────── -->
+  <div id="tab-themes" hidden data-min-role="system_admin">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+      <span class="sec-label" style="margin:0">Themes</span>
+      <button onclick="openThemeModal(null)" style="background:#B09050;color:#fff;border:none;padding:8px 16px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">+ Add Theme</button>
+    </div>
+    <div id="themes-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;margin-bottom:24px"></div>
+    <div id="theme-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200;align-items:center;justify-content:center">
+      <div style="background:#fff;border-radius:14px;padding:28px;width:100%;max-width:460px;max-height:90vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,.18)">
+        <h2 id="tmodal-title" style="font-size:17px;font-weight:800;margin:0 0 20px">Add Theme</h2>
+        <form id="theme-form">
+          <input type="hidden" id="tf-orig-id" />
+          <div style="margin-bottom:12px"><label style="font-size:12px;font-weight:700;color:#888;display:block;margin-bottom:4px">ID (slug)</label><input id="tf-id" required placeholder="main" style="width:100%;padding:9px 12px;border:1.5px solid #E5DDD0;border-radius:8px;font-size:13px;outline:none" /></div>
+          <div style="margin-bottom:12px"><label style="font-size:12px;font-weight:700;color:#888;display:block;margin-bottom:4px">Display Name</label><input id="tf-name" required placeholder="ACME Corp" style="width:100%;padding:9px 12px;border:1.5px solid #E5DDD0;border-radius:8px;font-size:13px;outline:none" /></div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+            <div><label style="font-size:12px;font-weight:700;color:#888;display:block;margin-bottom:4px">Landing BG</label><input id="tf-landingBg" type="color" value="#1a1a2e" style="height:36px;width:60px;cursor:pointer;border:none" /></div>
+            <div><label style="font-size:12px;font-weight:700;color:#888;display:block;margin-bottom:4px">Accent</label><input id="tf-accent" type="color" value="#4a90d9" style="height:36px;width:60px;cursor:pointer;border:none" /></div>
+            <div><label style="font-size:12px;font-weight:700;color:#888;display:block;margin-bottom:4px">Accent Dark</label><input id="tf-accentDark" type="color" value="#357abd" style="height:36px;width:60px;cursor:pointer;border:none" /></div>
+            <div><label style="font-size:12px;font-weight:700;color:#888;display:block;margin-bottom:4px">Swatch</label><input id="tf-swatchColor" type="color" value="#4a90d9" style="height:36px;width:60px;cursor:pointer;border:none" /></div>
+          </div>
+          <div style="margin-bottom:16px;display:flex;align-items:center;gap:8px"><input id="tf-corpLayout" type="checkbox" /><label for="tf-corpLayout" style="font-size:13px;color:#555">Corporate layout (white card)</label></div>
+          <div style="display:flex;gap:8px;justify-content:flex-end">
+            <button type="button" onclick="closeThemeModal()" style="padding:9px 18px;background:#F2EDE6;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;color:#555">Cancel</button>
+            <button type="submit" style="padding:9px 18px;background:#B09050;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">Save</button>
+          </div>
+          <div id="theme-form-msg" style="margin-top:10px"></div>
+        </form>
+        <div id="tmodal-delete-wrap" style="display:none;margin-top:12px;padding-top:12px;border-top:1px solid #F2EDE6">
+          <button id="tmodal-delete-btn" style="width:100%;padding:9px;background:#FEE2E2;color:#991B1B;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">Delete Theme</button>
+        </div>
       </div>
     </div>
   </div>
@@ -1320,13 +1355,15 @@ app.get('/admin', adminLimiter, (req, res) => {
 
   // ── Tabs ───────────────────────────────────────────────────────────────────
   function showTab(tab) {
-    ['staff','audit','admins'].forEach(function(t) {
+    ['staff','audit','admins','themes'].forEach(function(t) {
       var panel = document.getElementById('tab-' + t);
       var btn = document.getElementById('tbtn-' + t);
       if (panel) panel.hidden = (t !== tab);
       if (btn) btn.className = 'tab-btn' + (t === tab ? ' active' : '');
     });
     if (tab === 'admins') loadAdmins();
+    if (tab === 'themes' && !_themesLoaded) { _themesLoaded = true; loadThemesTab(); }
+    else if (tab === 'themes') renderThemesGrid();
   }
 
   // ── Stats + Health ─────────────────────────────────────────────────────────
@@ -1468,6 +1505,108 @@ app.get('/admin', adminLimiter, (req, res) => {
       })
       .catch(function() { showFlash(msg, 'error', 'Network error.'); });
   }
+
+  // ── Themes tab ────────────────────────────────────────────────────────────
+  var _themes = [];
+  var _themesLoaded = false;
+
+  function loadThemesTab() {
+    fetch('/admin/themes', { headers: authHeadersNoBody() })
+      .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+      .then(function(d) { _themes = d.themes || []; renderThemesGrid(); })
+      .catch(function(e) { console.error('loadThemesTab', e); });
+  }
+
+  function renderThemesGrid() {
+    var grid = document.getElementById('themes-grid');
+    if (!grid) return;
+    while (grid.firstChild) grid.removeChild(grid.firstChild);
+    if (!_themes.length) {
+      var empty = document.createElement('p');
+      empty.style.cssText = 'color:#aaa;font-size:13px';
+      empty.textContent = 'No themes yet. Add one to get started.';
+      grid.appendChild(empty);
+      return;
+    }
+    _themes.forEach(function(t) {
+      var card = document.createElement('div');
+      card.style.cssText = 'background:#fff;border-radius:12px;padding:16px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.06);display:flex;align-items:center;gap:12px';
+      card.onclick = function() { openThemeModal(t); };
+      var swatch = document.createElement('div');
+      swatch.style.cssText = 'width:36px;height:36px;border-radius:50%;flex-shrink:0';
+      swatch.style.background = t.swatchColor || t.accent || '#888';
+      var info = document.createElement('div');
+      var nm = document.createElement('div');
+      nm.style.cssText = 'font-weight:700;font-size:13px;margin-bottom:2px';
+      nm.textContent = t.name;
+      var id = document.createElement('div');
+      id.style.cssText = 'font-size:11px;color:#aaa;font-family:monospace';
+      id.textContent = t.id;
+      info.appendChild(nm);
+      info.appendChild(id);
+      card.appendChild(swatch);
+      card.appendChild(info);
+      grid.appendChild(card);
+    });
+  }
+
+  function openThemeModal(theme) {
+    var isEdit = !!theme;
+    document.getElementById('tmodal-title').textContent = isEdit ? 'Edit Theme' : 'Add Theme';
+    document.getElementById('tf-orig-id').value = isEdit ? theme.id : '';
+    document.getElementById('tf-id').value = isEdit ? theme.id : '';
+    document.getElementById('tf-id').disabled = isEdit;
+    document.getElementById('tf-name').value = isEdit ? (theme.name || '') : '';
+    document.getElementById('tf-landingBg').value = isEdit ? (theme.landingBg || '#1a1a2e') : '#1a1a2e';
+    document.getElementById('tf-accent').value = isEdit ? (theme.accent || '#4a90d9') : '#4a90d9';
+    document.getElementById('tf-accentDark').value = isEdit ? (theme.accentDark || '#357abd') : '#357abd';
+    document.getElementById('tf-swatchColor').value = isEdit ? (theme.swatchColor || '#4a90d9') : '#4a90d9';
+    document.getElementById('tf-corpLayout').checked = isEdit ? !!theme.corporateLayout : false;
+    document.getElementById('tmodal-delete-wrap').style.display = isEdit ? 'block' : 'none';
+    if (isEdit) {
+      document.getElementById('tmodal-delete-btn').onclick = function() { confirmDeleteTheme(theme.id); };
+    }
+    document.getElementById('theme-form-msg').textContent = '';
+    document.getElementById('theme-modal').style.display = 'flex';
+  }
+
+  function closeThemeModal() {
+    document.getElementById('theme-modal').style.display = 'none';
+  }
+
+  function confirmDeleteTheme(id) {
+    if (!confirm('Delete theme "' + id + '"? Cannot be undone.')) return;
+    fetch('/admin/themes/' + encodeURIComponent(id), { method: 'DELETE', headers: authHeadersNoBody() })
+      .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+      .then(function() { closeThemeModal(); loadThemesTab(); })
+      .catch(function(e) {
+        document.getElementById('theme-form-msg').textContent = 'Delete failed: ' + e.message;
+      });
+  }
+
+  document.getElementById('theme-form').addEventListener('submit', function(e) {
+    e.preventDefault();
+    var origId = document.getElementById('tf-orig-id').value;
+    var isEdit = !!origId;
+    var theme = {
+      id: document.getElementById('tf-id').value.trim(),
+      name: document.getElementById('tf-name').value.trim(),
+      landingBg: document.getElementById('tf-landingBg').value,
+      accent: document.getElementById('tf-accent').value,
+      accentDark: document.getElementById('tf-accentDark').value,
+      swatchColor: document.getElementById('tf-swatchColor').value,
+      corporateLayout: document.getElementById('tf-corpLayout').checked,
+    };
+    var url = isEdit ? ('/admin/themes/' + encodeURIComponent(origId)) : '/admin/themes';
+    var method = isEdit ? 'PUT' : 'POST';
+    fetch(url, { method: method, headers: authHeaders(), body: JSON.stringify(theme) })
+      .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, d: d }; }); })
+      .then(function(res) {
+        if (res.ok) { closeThemeModal(); loadThemesTab(); }
+        else { document.getElementById('theme-form-msg').textContent = res.d.error || 'Save failed.'; }
+      })
+      .catch(function() { document.getElementById('theme-form-msg').textContent = 'Network error.'; });
+  });
 
   // ── Auto-refresh ───────────────────────────────────────────────────────────
   function startCountdown() {
