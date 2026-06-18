@@ -1,0 +1,26 @@
+{
+  "expo": {
+    "name": "TapCard",
+    "slug": "tapcard",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#1a1a2e"
+    },
+    "web": {
+      "favicon": "./assets/icon.png",
+      "bundler": "metro",
+      "name": "TapCard",
+      "shortName": "TapCard",
+      "description": "Digital Business Card",
+      "themeColor": "#1a1a2e",
+      "backgroundColor": "#0A0A0A",
+      "display": "standalone",
+      "orientation": "portrait"
+    },
+    "platforms": ["ios", "android", "web"]
+  }
+}
