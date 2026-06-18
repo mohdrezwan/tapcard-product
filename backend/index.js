@@ -263,6 +263,22 @@ function sanitizeVCardField(str) {
 
 // ─── Routes ───────────────────────────────────────────────────────────────────
 
+// ─── Public config — themes, oauthClientId, appName ─────────────────────────
+app.get('/api/config', async (req, res) => {
+  try {
+    const [themesSnap, appSnap] = await Promise.all([
+      db.collection('config').doc('themes').get(),
+      db.collection('config').doc('app').get(),
+    ]);
+    const themes = (themesSnap.exists && themesSnap.data().themes) || [];
+    const appName = (appSnap.exists && appSnap.data().name) || APP_NAME;
+    res.json({ oauthClientId: OAUTH_CLIENT_ID, appName, themes });
+  } catch (err) {
+    log.error('GET /api/config', { error: err.message });
+    res.json({ oauthClientId: OAUTH_CLIENT_ID, appName: APP_NAME, themes: [] });
+  }
+});
+
 // ─── Health check — public: {status:'ok'} only; admin token: full detail ─────
 app.get('/health', async (req, res) => {
   const auth = (req.headers.authorization || '').replace('Bearer ', '').trim();
@@ -730,6 +746,90 @@ app.post('/admin/admins', adminLimiter, requireAdmin, express.json(), async (req
   }
 
   res.status(400).json({ error: 'Invalid action.' });
+});
+
+// ─── Theme CRUD (system_admin + superadmin) ───────────────────────────────────
+
+async function loadThemes() {
+  const snap = await db.collection('config').doc('themes').get();
+  return (snap.exists && snap.data().themes) || [];
+}
+
+async function saveThemes(themes) {
+  await db.collection('config').doc('themes').set({ themes });
+}
+
+app.get('/admin/themes', adminLimiter, requireAdmin, requireRole('system_admin'), async (req, res) => {
+  try {
+    res.json({ themes: await loadThemes() });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/admin/themes', adminLimiter, requireAdmin, requireRole('system_admin'), async (req, res) => {
+  try {
+    const theme = req.body;
+    if (!theme.id) return res.status(400).json({ error: 'theme.id required' });
+    const themes = await loadThemes();
+    if (themes.find(t => t.id === theme.id)) return res.status(409).json({ error: 'Theme id already exists' });
+    themes.push(theme);
+    await saveThemes(themes);
+    logAudit('INFO', 'THEME_ADD', req.adminEmail, `Added theme: ${theme.id}`, req.ip);
+    res.status(201).json({ theme });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/admin/themes/:id', adminLimiter, requireAdmin, requireRole('system_admin'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const themes = await loadThemes();
+    const idx = themes.findIndex(t => t.id === id);
+    if (idx === -1) return res.status(404).json({ error: 'Theme not found' });
+    themes[idx] = Object.assign({}, themes[idx], req.body, { id });
+    await saveThemes(themes);
+    logAudit('INFO', 'THEME_UPDATE', req.adminEmail, `Updated theme: ${id}`, req.ip);
+    res.json({ theme: themes[idx] });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/admin/themes/:id', adminLimiter, requireAdmin, requireRole('system_admin'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const themes = await loadThemes();
+    const idx = themes.findIndex(t => t.id === id);
+    if (idx === -1) return res.status(404).json({ error: 'Theme not found' });
+    themes.splice(idx, 1);
+    await saveThemes(themes);
+    logAudit('INFO', 'THEME_DELETE', req.adminEmail, `Deleted theme: ${id}`, req.ip);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+const themeAssetUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
+
+app.post('/admin/themes/:id/assets', adminLimiter, requireAdmin, requireRole('system_admin'), themeAssetUpload.single('file'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const field = req.body.field || 'bg';
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+    const ext = req.file.originalname.split('.').pop().toLowerCase();
+    const gcsPath = `themes/${id}/${field}.${ext}`;
+    const file = bucket.file(gcsPath);
+    await file.save(req.file.buffer, { contentType: req.file.mimetype });
+    await file.makePublic().catch(() => {});
+    const url = `https://storage.googleapis.com/${PHOTO_BUCKET}/${gcsPath}`;
+    logAudit('INFO', 'THEME_ASSET_UPLOAD', req.adminEmail, `${id}/${field}.${ext}`, req.ip);
+    res.json({ url });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ─── Admin: dashboard HTML ────────────────────────────────────────────────────
