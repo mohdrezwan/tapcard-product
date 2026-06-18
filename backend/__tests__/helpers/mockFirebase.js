@@ -1,6 +1,7 @@
 // Shared Firestore + Storage mock factory used across test suites.
 
 function makeFirestoreMock(docData) {
+  let autoId = 0;
   const docs = Object.assign({}, docData || {});
 
   // collectionName prefix prevents key collision between collection().doc() and db.doc()
@@ -32,7 +33,7 @@ function makeFirestoreMock(docData) {
       return {
         doc: jest.fn(function(id) { return docRef(collName + '/' + id); }),
         add: jest.fn(function(data) {
-          const id = 'auto-' + Date.now();
+          const id = 'auto-' + (++autoId);
           docs[collName + '/' + id] = data;
           return Promise.resolve({ id: id });
         }),

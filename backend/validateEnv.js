@@ -1,7 +1,7 @@
 // Validates that all required environment variables are present.
 // Returns array of missing variable names. Empty array = all present.
 
-var REQUIRED_ENV = [
+const REQUIRED_ENV = [
   'GOOGLE_CLIENT_SECRET',
   'OAUTH_CLIENT_ID',
   'ALLOWED_DOMAINS',

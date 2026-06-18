@@ -34,11 +34,11 @@ if (missing.length > 0) {
 const ADMIN_KEY = process.env.ADMIN_KEY || '';
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
 const OAUTH_CLIENT_ID = process.env.OAUTH_CLIENT_ID;
-const ALLOWED_DOMAINS = new Set(process.env.ALLOWED_DOMAINS.split(',').map(function(d) { return d.trim().toLowerCase(); }));
+const ALLOWED_DOMAINS = new Set(process.env.ALLOWED_DOMAINS.split(',').map(function(d) { return d.trim().toLowerCase(); }).filter(Boolean));
 const SUPERADMIN_EMAIL = process.env.SUPERADMIN_EMAIL.toLowerCase().trim();
 const GCP_PROJECT_ID = process.env.GCP_PROJECT_ID;
 const PHOTO_BUCKET = process.env.PHOTO_BUCKET;
-const ALLOWED_ORIGINS = process.env.CORS_ORIGINS.split(',').map(function(o) { return o.trim(); });
+const ALLOWED_ORIGINS = process.env.CORS_ORIGINS.split(',').map(function(o) { return o.trim(); }).filter(Boolean);
 const APP_NAME = process.env.APP_NAME || 'TapCard';
 const PORT = parseInt(process.env.PORT || '8080', 10);
 const DEBUG = process.env.DEBUG === 'true';
