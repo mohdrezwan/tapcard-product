@@ -1,22 +1,29 @@
 #!/usr/bin/env bash
 # TapCard — Guided Setup Wizard
-# Usage: curl -fsSL https://install.tapcard.dev/setup.sh | bash
+# Usage: curl -fsSL https://raw.githubusercontent.com/mohdrezwan/tapcard-product/master/installer/setup.sh | bash
 set -euo pipefail
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
 BLUE='\033[0;34m'; BOLD='\033[1m'; RESET='\033[0m'
 
-step()   { echo -e "\n${BOLD}${BLUE}[$1/8]${RESET} ${BOLD}$2${RESET}"; }
+step()   { echo -e "\n${BOLD}${BLUE}[$1/10]${RESET} ${BOLD}$2${RESET}"; }
 ok()     { echo -e "  ${GREEN}✓${RESET} $1"; }
 warn()   { echo -e "  ${YELLOW}⚠${RESET}  $1"; }
 fail()   { echo -e "  ${RED}✗${RESET} $1" >&2; exit 1; }
 prompt() { echo -en "  ${BOLD}→${RESET} $1: "; }
 
+open_browser() {
+  local url="$1"
+  if command -v open &>/dev/null; then open "$url"
+  elif command -v xdg-open &>/dev/null; then xdg-open "$url"
+  else echo "  Open manually: $url"; fi
+}
+
 INSTALLER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TAPCARD_DIR="$HOME/.tapcard"
 mkdir -p "$TAPCARD_DIR"
 
-# ─── [1/8] Prerequisites ──────────────────────────────────────────────────────
+# ─── [1/10] Prerequisites ─────────────────────────────────────────────────────
 step 1 "Prerequisites check"
 
 MISSING=()
@@ -47,7 +54,7 @@ if [ ${#MISSING[@]} -gt 0 ]; then
   [[ "$CONT" =~ ^[Yy]$ ]] || exit 1
 fi
 
-# ─── [2/8] GCP authentication ─────────────────────────────────────────────────
+# ─── [2/10] GCP authentication ────────────────────────────────────────────────
 step 2 "GCP authentication"
 
 echo "  Opening browser for gcloud login..."
@@ -68,17 +75,56 @@ read -r REGION
 REGION="${REGION:-asia-southeast1}"
 ok "Region: $REGION"
 
-# ─── [3/8] OAuth credentials ──────────────────────────────────────────────────
-step 3 "OAuth credentials"
+# ─── [3/10] Enable GCP APIs ───────────────────────────────────────────────────
+step 3 "Enabling required GCP APIs"
+
+echo "  This may take 1-2 minutes..."
+gcloud services enable \
+  run.googleapis.com \
+  firestore.googleapis.com \
+  storage.googleapis.com \
+  firebase.googleapis.com \
+  iam.googleapis.com \
+  cloudresourcemanager.googleapis.com \
+  iamcredentials.googleapis.com \
+  --project "$PROJECT_ID" --quiet
+
+ok "APIs enabled"
+
+# ─── [4/10] Firebase project setup ────────────────────────────────────────────
+step 4 "Firebase project setup"
+
+echo "  Adding Firebase to GCP project ${PROJECT_ID}..."
+if firebase projects:list 2>/dev/null | grep -q "$PROJECT_ID"; then
+  ok "Firebase already initialized for ${PROJECT_ID}"
+else
+  firebase projects:addfirebase "$PROJECT_ID" --project "$PROJECT_ID" 2>/dev/null && \
+    ok "Firebase added to ${PROJECT_ID}" || \
+    warn "Firebase init may need manual setup at console.firebase.google.com"
+fi
+
+echo "  Enabling Firebase Hosting..."
+firebase use "$PROJECT_ID" --add 2>/dev/null || firebase use "$PROJECT_ID" 2>/dev/null || true
+ok "Firebase Hosting ready"
+
+# ─── [5/10] OAuth credentials ─────────────────────────────────────────────────
+step 5 "OAuth credentials"
 
 echo ""
-echo "  Create a Google OAuth 2.0 Web Application credential:"
-echo "  1. Open: https://console.cloud.google.com/apis/credentials?project=${PROJECT_ID}"
-echo "  2. Create Credentials → OAuth Client ID → Web application"
+echo "  Opening Google Cloud Console to create OAuth credentials..."
+echo ""
+echo "  Follow these steps in the browser:"
+echo "  1. Click 'Create Credentials' → 'OAuth Client ID'"
+echo "  2. Application type: Web application"
 echo "  3. Name: TapCard"
-echo "  4. Authorised JavaScript origins: https://${PROJECT_ID}.web.app (+ custom domain if any)"
+echo "  4. Authorised JavaScript origins:"
+echo "       https://${PROJECT_ID}.web.app"
+echo "       https://${PROJECT_ID}.firebaseapp.com"
 echo "  5. Authorised redirect URIs: same as above"
-echo "  6. Click Create — copy the Client ID and Client Secret shown"
+echo "  6. Click Create — copy the Client ID and Client Secret"
+echo ""
+read -rp "  Press Enter to open browser..." _
+open_browser "https://console.cloud.google.com/apis/credentials/oauthclient?project=${PROJECT_ID}"
 echo ""
 
 prompt "OAuth Client ID"
@@ -87,9 +133,10 @@ read -r OAUTH_CLIENT_ID
 prompt "OAuth Client Secret"
 read -rsp "" OAUTH_CLIENT_SECRET
 echo ""
+ok "OAuth credentials saved"
 
-# ─── [4/8] Company configuration ─────────────────────────────────────────────
-step 4 "Company configuration"
+# ─── [6/10] Company configuration ────────────────────────────────────────────
+step 6 "Company configuration"
 
 prompt "Allowed email domains (comma-separated, e.g. acme.com,sub.acme.com)"
 read -r ALLOWED_DOMAINS
@@ -106,7 +153,7 @@ prompt "GCS photo bucket name (default: ${SUGGESTED_BUCKET})"
 read -r PHOTO_BUCKET
 PHOTO_BUCKET="${PHOTO_BUCKET:-$SUGGESTED_BUCKET}"
 
-prompt "Custom domain (e.g. cards.acme.com, leave blank for Firebase default)"
+prompt "Custom domain (e.g. cards.acme.com, leave blank to skip)"
 read -r CUSTOM_DOMAIN
 
 CORS_ORIGINS="https://${PROJECT_ID}.web.app,https://${PROJECT_ID}.firebaseapp.com"
@@ -114,11 +161,13 @@ if [ -n "$CUSTOM_DOMAIN" ]; then
   CORS_ORIGINS="https://${CUSTOM_DOMAIN},${CORS_ORIGINS}"
 fi
 
-# ─── [5/8] Infrastructure provisioning ───────────────────────────────────────
-step 5 "Infrastructure provisioning"
+ok "Configuration saved"
+
+# ─── [7/10] Infrastructure provisioning ──────────────────────────────────────
+step 7 "Infrastructure provisioning"
 
 cd "$INSTALLER_DIR/terraform"
-terraform init -input=false -upgrade
+terraform init -input=false -upgrade -reconfigure 2>/dev/null || terraform init -input=false -upgrade
 
 terraform apply -input=false -auto-approve \
   -var="project_id=${PROJECT_ID}" \
@@ -126,11 +175,11 @@ terraform apply -input=false -auto-approve \
   -var="bucket_name=${PHOTO_BUCKET}" \
   -var="service_account_id=tapcard-api-sa"
 
-ok "Cloud Run service, GCS bucket, Firestore, IAM provisioned"
+ok "Cloud Run, GCS bucket, Firestore, IAM provisioned"
 cd "$INSTALLER_DIR"
 
-# ─── [6/8] Backend deployment ─────────────────────────────────────────────────
-step 6 "Backend deployment"
+# ─── [8/10] Backend deployment ────────────────────────────────────────────────
+step 8 "Backend deployment"
 
 TAPCARD_VERSION="${TAPCARD_VERSION:-latest}"
 echo "  Deploying mohdrezwan/tapcard-backend:${TAPCARD_VERSION}..."
@@ -156,8 +205,8 @@ BACKEND_URL=$(gcloud run services describe tapcard-api --region "$REGION" \
   --format 'value(status.url)' --project "$PROJECT_ID")
 ok "Backend: $BACKEND_URL"
 
-# ─── [7/8] Frontend deployment ────────────────────────────────────────────────
-step 7 "Frontend deployment"
+# ─── [9/10] Frontend deployment ───────────────────────────────────────────────
+step 9 "Frontend deployment"
 
 WORK_DIR=$(mktemp -d)
 trap 'rm -rf "$WORK_DIR"' EXIT
@@ -179,17 +228,15 @@ sed "s|REGION|${REGION}|g" \
   "${INSTALLER_DIR}/../customer-template/firebase.json.template" \
   > "${WORK_DIR}/firebase.json"
 
-firebase use --add "$PROJECT_ID" 2>/dev/null || firebase use "$PROJECT_ID"
-
 (cd "$WORK_DIR" && firebase deploy --only hosting \
-  --project "$PROJECT_ID" --public dist)
+  --project "$PROJECT_ID" --public dist/frontend/dist)
 
 HOSTING_URL="https://${PROJECT_ID}.web.app"
 [ -n "$CUSTOM_DOMAIN" ] && HOSTING_URL="https://${CUSTOM_DOMAIN}"
 ok "Frontend: $HOSTING_URL"
 
-# ─── [8/8] Seed initial data ──────────────────────────────────────────────────
-step 8 "Seed initial data"
+# ─── [10/10] Seed initial data ────────────────────────────────────────────────
+step 10 "Seed initial data"
 
 FS_BASE="https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents"
 SEED_FILE="${INSTALLER_DIR}/seed/default-themes.json"
@@ -243,10 +290,16 @@ ok "State saved: $STATE_FILE"
 
 # ─── Done ─────────────────────────────────────────────────────────────────────
 echo ""
-echo -e "${GREEN}${BOLD}✓ Setup complete.${RESET}"
+echo -e "${GREEN}${BOLD}✓ TapCard setup complete!${RESET}"
 echo ""
 echo -e "  Admin panel:  ${BOLD}${HOSTING_URL}/admin${RESET}"
 echo -e "  Sign in with: ${BOLD}${SUPERADMIN_EMAIL}${RESET}"
 echo ""
-echo "  Next: customize your themes in the admin dashboard."
+echo "  Next steps:"
+echo "  1. Sign in as superadmin and upload your staff CSV"
+echo "  2. Customise themes in the admin dashboard"
+if [ -n "$CUSTOM_DOMAIN" ]; then
+  echo "  3. Point ${CUSTOM_DOMAIN} DNS to Firebase Hosting:"
+  echo "     Firebase Console → Hosting → Add custom domain"
+fi
 echo ""
