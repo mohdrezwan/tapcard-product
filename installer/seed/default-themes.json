@@ -1,0 +1,17 @@
+[
+  {
+    "id": "main",
+    "name": "Corporate",
+    "landingBg": "#1a1a2e",
+    "accent": "#4a90d9",
+    "accentDark": "#357abd",
+    "swatchColor": "#4a90d9",
+    "corporateLayout": true,
+    "subsidiary": {
+      "companyName": "",
+      "companyReg": "",
+      "addressLines": [],
+      "website": ""
+    }
+  }
+]
