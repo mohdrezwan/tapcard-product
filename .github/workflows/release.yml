@@ -29,8 +29,8 @@ jobs:
           context: backend/
           push: true
           tags: |
-            tapcard/backend:${{ github.ref_name }}
-            tapcard/backend:latest
+            mohdrezwan/tapcard-backend:${{ github.ref_name }}
+            mohdrezwan/tapcard-backend:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 

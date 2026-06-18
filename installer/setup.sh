@@ -133,10 +133,10 @@ cd "$INSTALLER_DIR"
 step 6 "Backend deployment"
 
 TAPCARD_VERSION="${TAPCARD_VERSION:-latest}"
-echo "  Deploying tapcard/backend:${TAPCARD_VERSION}..."
+echo "  Deploying mohdrezwan/tapcard-backend:${TAPCARD_VERSION}..."
 
 gcloud run deploy tapcard-api \
-  --image "tapcard/backend:${TAPCARD_VERSION}" \
+  --image "mohdrezwan/tapcard-backend:${TAPCARD_VERSION}" \
   --region "$REGION" \
   --platform managed \
   --allow-unauthenticated \
@@ -164,12 +164,12 @@ trap 'rm -rf "$WORK_DIR"' EXIT
 
 if [ "$TAPCARD_VERSION" = "latest" ]; then
   TAPCARD_VERSION=$(curl -fsSL \
-    "https://api.github.com/repos/tapcard-dev/tapcard-product/releases/latest" \
+    "https://api.github.com/repos/mohdrezwan/tapcard-product/releases/latest" \
     | jq -r .tag_name)
 fi
 
 DIST_ZIP="dist-${TAPCARD_VERSION}.zip"
-DIST_URL="https://github.com/tapcard-dev/tapcard-product/releases/download/${TAPCARD_VERSION}/${DIST_ZIP}"
+DIST_URL="https://github.com/mohdrezwan/tapcard-product/releases/download/${TAPCARD_VERSION}/${DIST_ZIP}"
 
 echo "  Downloading dist-${TAPCARD_VERSION}.zip..."
 curl -fsSL -o "${WORK_DIR}/${DIST_ZIP}" "$DIST_URL"

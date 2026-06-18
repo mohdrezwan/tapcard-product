@@ -7,7 +7,7 @@ resource "google_cloud_run_v2_service" "tapcard_api" {
     service_account = var.service_account
 
     containers {
-      image = "tapcard/backend:latest"
+      image = "mohdrezwan/tapcard-backend:latest"
 
       resources {
         limits = {

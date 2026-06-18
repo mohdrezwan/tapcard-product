@@ -44,7 +44,7 @@ echo ""
 
 # ─── Check latest version ─────────────────────────────────────────────────────
 LATEST=$(curl -fsSL \
-  "https://api.github.com/repos/tapcard-dev/tapcard-product/releases/latest" \
+  "https://api.github.com/repos/mohdrezwan/tapcard-product/releases/latest" \
   | jq -r .tag_name 2>/dev/null || echo "")
 
 if [ -z "$LATEST" ]; then
@@ -71,7 +71,7 @@ echo ""
 echo -e "${BOLD}Updating backend...${RESET}"
 
 gcloud run deploy tapcard-api \
-  --image "tapcard/backend:${LATEST}" \
+  --image "mohdrezwan/tapcard-backend:${LATEST}" \
   --region "$REGION" \
   --platform managed \
   --project "$PROJECT_ID" \
@@ -85,7 +85,7 @@ echo -e "${BOLD}Updating frontend...${RESET}"
 
 DIST_ZIP="dist-${LATEST}.zip"
 curl -fsSL -o "${WORK_DIR}/${DIST_ZIP}" \
-  "https://github.com/tapcard-dev/tapcard-product/releases/download/${LATEST}/${DIST_ZIP}"
+  "https://github.com/mohdrezwan/tapcard-product/releases/download/${LATEST}/${DIST_ZIP}"
 unzip -q "${WORK_DIR}/${DIST_ZIP}" -d "$WORK_DIR/dist"
 
 sed "s|REGION|${REGION}|g" \
